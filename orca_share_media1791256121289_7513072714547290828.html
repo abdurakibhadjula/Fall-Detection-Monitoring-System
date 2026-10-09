@@ -1,0 +1,1182 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>Fall Detector • BLE Monitor</title>
+
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden}
+body{
+  font-family:Arial,sans-serif;
+  background:#0f172a;
+  color:#f8fafc;
+}
+header{
+  height:48px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:0 12px;
+  background:#1e293b;
+  border-bottom:1px solid #334155;
+}
+h1{font-size:16px;margin:0}
+.badge{
+  padding:5px 10px;
+  border-radius:15px;
+  font-size:11px;
+  font-weight:bold;
+}
+.disconnected{background:#334155;color:#cbd5e1}
+.connected{background:#064e3b;color:#6ee7b7}
+.normal{background:#064e3b;color:#6ee7b7}
+.warning{background:#78350f;color:#fde68a}
+.danger{background:#991b1b;color:white}
+
+#alertBar{
+  height:46px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:0 12px;
+  border-bottom:1px solid #334155;
+  font-size:12px;
+  font-weight:bold;
+}
+#alertBar.normal{background:#052e2b}
+#alertBar.warning{background:#78350f}
+#alertBar.danger{
+  background:#991b1b;
+  animation:pulse 1s infinite;
+}
+@keyframes pulse{
+  50%{opacity:.78}
+}
+
+.controls{
+  height:44px;
+  display:flex;
+  align-items:center;
+  gap:6px;
+  flex-wrap:wrap;
+  padding:5px 8px;
+  background:#0b1220;
+  border-bottom:1px solid #334155;
+}
+button,select{
+  font:11px Arial,sans-serif;
+  padding:6px 9px;
+  border:1px solid #475569;
+  border-radius:5px;
+  background:#1e293b;
+  color:#f8fafc;
+}
+button{cursor:pointer}
+button:disabled{opacity:.45;cursor:not-allowed}
+#connect{background:#2563eb;border-color:#2563eb}
+#cancel{
+  background:#111827;
+  border-color:#f8fafc;
+}
+label{font-size:11px;color:#cbd5e1}
+
+.main{
+  height:calc(100vh - 138px);
+  min-height:0;
+  display:grid;
+  grid-template-columns:38% 62%;
+  gap:7px;
+  padding:7px;
+}
+.left{
+  min-height:0;
+  display:grid;
+  grid-template-rows:1fr 90px;
+  gap:7px;
+}
+.card{
+  min-height:0;
+  background:#111827;
+  border:1px solid #334155;
+  border-radius:7px;
+  padding:7px;
+}
+.title{
+  height:18px;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-bottom:4px;
+  color:#cbd5e1;
+  font-size:11px;
+  font-weight:bold;
+}
+#orientCanvas{
+  width:100%;
+  height:calc(100% - 22px);
+  display:block;
+  border-radius:5px;
+  background:#020617;
+}
+.state{
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+  gap:4px;
+}
+.stateRow{
+  display:flex;
+  justify-content:space-between;
+  font-size:11px;
+}
+.value{font-weight:bold}
+
+.graphGrid{
+  min-height:0;
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  grid-template-rows:repeat(3,1fr);
+  gap:7px;
+}
+.graphCard{
+  min-height:0;
+  display:flex;
+  flex-direction:column;
+}
+.graphCanvas{
+  flex:1;
+  width:100%;
+  min-height:0;
+  display:block;
+  background:#020617;
+  border-radius:4px;
+}
+.note{
+  color:#94a3b8;
+  font-size:9px;
+  padding-left:4px;
+}
+
+@media(max-width:850px){
+  html,body{overflow:auto}
+  .main{
+    height:auto;
+    min-height:calc(100vh - 138px);
+    grid-template-columns:1fr;
+  }
+  .left{grid-template-rows:360px 90px}
+  .graphGrid{
+    height:660px;
+    grid-template-rows:repeat(3,1fr);
+  }
+}
+</style>
+</head>
+
+<body>
+
+<header>
+  <h1>Fall Detection • BLE IMU Monitor</h1>
+  <div id="connection" class="badge disconnected">Disconnected</div>
+</header>
+
+<div id="alertBar" class="normal">
+  <span id="alertText">SYSTEM READY — No fall detected</span>
+  <button id="cancel" hidden>Cancel Alarm</button>
+</div>
+
+<div class="controls">
+  <button id="connect">Connect BLE</button>
+  <button id="disconnect" disabled>Disconnect</button>
+  <button id="pause" disabled>Pause</button>
+  <button id="clear">Clear</button>
+
+  <label>
+    Window
+    <select id="window">
+      <option value="100">100</option>
+      <option value="250" selected>250</option>
+      <option value="500">500</option>
+      <option value="1000">1000</option>
+    </select>
+  </label>
+
+  <span class="note">
+    X = Left/Right • Y = Forward/Backward • Z = Up/Down
+  </span>
+</div>
+
+<div class="main">
+
+  <div class="left">
+
+    <div class="card">
+      <div class="title">
+        <span>3D Orientation • Roll Ignored</span>
+        <span id="angles">Pitch 0° • Yaw 0°</span>
+      </div>
+      <canvas id="orientCanvas"></canvas>
+    </div>
+
+    <div class="card state">
+      <div class="stateRow">
+        <span>Motion</span>
+        <span id="motion" class="value">Waiting</span>
+      </div>
+      <div class="stateRow">
+        <span>Acceleration magnitude</span>
+        <span id="accMag" class="value">0.00 m/s²</span>
+      </div>
+      <div class="stateRow">
+        <span>Last confirmed event</span>
+        <span id="lastEvent" class="value">None</span>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="graphGrid">
+
+    <div class="card graphCard">
+      <div class="title"><span>Acceleration X</span><span>Left / Right</span></div>
+      <canvas class="graphCanvas" id="ax"></canvas>
+    </div>
+
+    <div class="card graphCard">
+      <div class="title"><span>Gyroscope X</span><span>°/s</span></div>
+      <canvas class="graphCanvas" id="gx"></canvas>
+    </div>
+
+    <div class="card graphCard">
+      <div class="title"><span>Acceleration Y</span><span>Forward / Backward</span></div>
+      <canvas class="graphCanvas" id="ay"></canvas>
+    </div>
+
+    <div class="card graphCard">
+      <div class="title"><span>Gyroscope Y</span><span>°/s</span></div>
+      <canvas class="graphCanvas" id="gy"></canvas>
+    </div>
+
+    <div class="card graphCard">
+      <div class="title"><span>Acceleration Z</span><span>Up / Down</span></div>
+      <canvas class="graphCanvas" id="az"></canvas>
+    </div>
+
+    <div class="card graphCard">
+      <div class="title"><span>Gyroscope Z</span><span>°/s</span></div>
+      <canvas class="graphCanvas" id="gz"></canvas>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ============================================================
+// BLE CONFIG - MUST MATCH ARDUINO
+// ============================================================
+
+const DEVICE_NAME = "FallDetector";
+
+const SERVICE_UUID =
+  "19b10000-e8f2-537e-4f6c-d104768a1214";
+
+const ALERT_UUID =
+  "19b10001-e8f2-537e-4f6c-d104768a1214";
+
+const DATA_UUID =
+  "19b10002-e8f2-537e-4f6c-d104768a1214";
+
+const COMMAND_UUID =
+  "19b10003-e8f2-537e-4f6c-d104768a1214";
+
+
+// ============================================================
+// STATE
+// ============================================================
+
+let device = null;
+let server = null;
+let alertChar = null;
+let dataChar = null;
+let commandChar = null;
+
+let connected = false;
+let paused = false;
+
+let sampleCount = 0;
+let maxSamples = 250;
+
+let pitch = 0;
+let yaw = 0;
+let lastTime = null;
+
+const axes = ["ax","ay","az","gx","gy","gz"];
+const data = {
+  ax:[],
+  ay:[],
+  az:[],
+  gx:[],
+  gy:[],
+  gz:[]
+};
+
+
+// ============================================================
+// DOM
+// ============================================================
+
+const connectionEl = document.getElementById("connection");
+const alertBar = document.getElementById("alertBar");
+const alertText = document.getElementById("alertText");
+
+const connectBtn = document.getElementById("connect");
+const disconnectBtn = document.getElementById("disconnect");
+const pauseBtn = document.getElementById("pause");
+const clearBtn = document.getElementById("clear");
+const cancelBtn = document.getElementById("cancel");
+
+const windowSelect = document.getElementById("window");
+
+const anglesEl = document.getElementById("angles");
+const motionEl = document.getElementById("motion");
+const accMagEl = document.getElementById("accMag");
+const lastEventEl = document.getElementById("lastEvent");
+
+const decoder = new TextDecoder();
+const encoder = new TextEncoder();
+
+
+// ============================================================
+// UI
+// ============================================================
+
+function setConnection(isConnected) {
+
+  connected = isConnected;
+
+  connectionEl.textContent =
+    isConnected ? "Connected" : "Disconnected";
+
+  connectionEl.className =
+    "badge " + (isConnected ? "connected" : "disconnected");
+
+  connectBtn.disabled = isConnected;
+  disconnectBtn.disabled = !isConnected;
+  pauseBtn.disabled = !isConnected;
+}
+
+function setAlert(type, message) {
+
+  alertBar.className = type;
+  alertText.textContent = message;
+
+  cancelBtn.hidden = type === "normal";
+
+  if (type !== "normal") {
+    lastEventEl.textContent = message;
+  }
+}
+
+function setMotion(accMag) {
+
+  accMagEl.textContent =
+    accMag.toFixed(2) + " m/s²";
+
+  if (accMag < 2.5) {
+    motionEl.textContent = "FREE-FALL RANGE";
+  } else if (accMag > 20) {
+    motionEl.textContent = "HIGH MOTION";
+  } else {
+    motionEl.textContent = "Normal";
+  }
+}
+
+
+// ============================================================
+// NOTIFICATION
+// ============================================================
+
+async function enableNotifications() {
+
+  if (!("Notification" in window)) {
+    return;
+  }
+
+  try {
+    if (Notification.permission === "default") {
+      await Notification.requestPermission();
+    }
+  } catch (e) {
+    console.log("Notification permission:", e);
+  }
+}
+
+function phoneNotification(message) {
+
+  if (
+    !("Notification" in window) ||
+    Notification.permission !== "granted"
+  ) {
+    return;
+  }
+
+  try {
+    new Notification("Fall Detector", {
+      body: message,
+      tag: "fall-detector"
+    });
+  } catch (e) {
+    console.log("Notification error:", e);
+  }
+}
+
+function phoneVibration() {
+  if ("vibrate" in navigator) {
+    navigator.vibrate([300,150,300,150,600]);
+  }
+}
+
+
+// ============================================================
+// BLE CONNECT
+// ============================================================
+
+async function connectBLE() {
+
+  if (!("bluetooth" in navigator)) {
+    alert(
+      "Web Bluetooth is not available in this browser. " +
+      "Use a supported Chromium-based browser."
+    );
+    return;
+  }
+
+  try {
+
+    await enableNotifications();
+
+    device = await navigator.bluetooth.requestDevice({
+      filters: [
+        { name: DEVICE_NAME }
+      ],
+      optionalServices: [SERVICE_UUID]
+    });
+
+    device.addEventListener(
+      "gattserverdisconnected",
+      handleDisconnect
+    );
+
+    server = await device.gatt.connect();
+
+    const service =
+      await server.getPrimaryService(SERVICE_UUID);
+
+    alertChar =
+      await service.getCharacteristic(ALERT_UUID);
+
+    dataChar =
+      await service.getCharacteristic(DATA_UUID);
+
+    commandChar =
+      await service.getCharacteristic(COMMAND_UUID);
+
+    // Subscribe to notifications.
+    await alertChar.startNotifications();
+    await dataChar.startNotifications();
+
+    alertChar.addEventListener(
+      "characteristicvaluechanged",
+      handleAlert
+    );
+
+    dataChar.addEventListener(
+      "characteristicvaluechanged",
+      handleData
+    );
+
+    // Read current states.
+    try {
+      const currentAlert =
+        await alertChar.readValue();
+      handleAlert({ target:{ value:currentAlert } });
+    } catch (e) {}
+
+    try {
+      const currentData =
+        await dataChar.readValue();
+      handleData({ target:{ value:currentData } });
+    } catch (e) {}
+
+    setConnection(true);
+    setAlert("normal", "CONNECTED — Monitoring");
+
+  } catch (e) {
+
+    console.error(e);
+
+    setConnection(false);
+    setAlert(
+      "warning",
+      "Connection failed — " + e.message
+    );
+  }
+}
+
+
+// ============================================================
+// BLE DISCONNECT
+// ============================================================
+
+async function disconnectBLE() {
+
+  try {
+
+    if (device && device.gatt && device.gatt.connected) {
+      device.gatt.disconnect();
+    }
+
+  } catch (e) {
+    console.error(e);
+  }
+
+  cleanupBLE();
+}
+
+function handleDisconnect() {
+
+  cleanupBLE();
+  setAlert("normal", "DISCONNECTED");
+}
+
+function cleanupBLE() {
+
+  connected = false;
+
+  alertChar = null;
+  dataChar = null;
+  commandChar = null;
+  server = null;
+
+  setConnection(false);
+}
+
+
+// ============================================================
+// BLE DATA
+// ============================================================
+
+function handleData(event) {
+
+  const text = decoder.decode(event.target.value);
+
+  // DATA,ax,ay,az,gx,gy,gz
+  if (!text.startsWith("DATA,")) {
+    return;
+  }
+
+  const parts = text.trim().split(",");
+
+  if (parts.length !== 7) {
+    return;
+  }
+
+  const values = parts
+    .slice(1)
+    .map(Number);
+
+  if (values.some(v => !Number.isFinite(v))) {
+    return;
+  }
+
+  const [ax,ay,az,gx,gy,gz] = values;
+
+  // The graph/3D display can be paused without stopping BLE.
+  if (!paused) {
+    pushData("ax",ax);
+    pushData("ay",ay);
+    pushData("az",az);
+    pushData("gx",gx);
+    pushData("gy",gy);
+    pushData("gz",gz);
+
+    updateOrientation(ax,ay,az,gx,gy,gz);
+  }
+
+  setMotion(
+    Math.sqrt(
+      ax*ax + ay*ay + az*az
+    )
+  );
+
+  sampleCount++;
+}
+
+
+// ============================================================
+// BLE ALERTS
+// ============================================================
+
+function handleAlert(event) {
+
+  const text =
+    decoder.decode(event.target.value).trim();
+
+  switch (text) {
+
+    case "SYSTEM READY":
+      setAlert("normal","SYSTEM READY — No fall detected");
+      break;
+
+    case "FREE FALL":
+      // Internal detection stage only; do not display it.
+      break;
+
+    case "NORMAL":
+      setAlert("normal", "MONITORING — No confirmed fall");
+      break;
+
+    case "FALL DETECTED":
+      setAlert("danger",
+        "FALL DETECTED — CHECK THE PATIENT");
+      phoneNotification("Fall detected. Check the monitored person.");
+      phoneVibration();
+      break;
+
+    case "FALL CANCELLED":
+      setAlert("normal",
+        "FALL CANCELLED — User pressed cancel");
+      break;
+
+    case "NO ACTIVE FALL":
+      setAlert("normal","No active fall");
+      break;
+
+    default:
+      setAlert("normal",text || "Normal");
+      break;
+  }
+}
+
+
+// ============================================================
+// SEND COMMAND TO ARDUINO
+// ============================================================
+
+async function sendCommand(command) {
+
+  if (!commandChar) {
+    return;
+  }
+
+  const bytes = encoder.encode(command);
+
+  try {
+
+    if (
+      typeof commandChar.writeValueWithResponse === "function"
+    ) {
+      await commandChar.writeValueWithResponse(bytes);
+    } else {
+      await commandChar.writeValue(bytes);
+    }
+
+  } catch (e) {
+    console.error("BLE command error:", e);
+  }
+}
+
+
+// ============================================================
+// GRAPH DATA
+// ============================================================
+
+function pushData(axis,value) {
+
+  data[axis].push(value);
+
+  while (data[axis].length > maxSamples) {
+    data[axis].shift();
+  }
+}
+
+function clearGraphs() {
+
+  axes.forEach(axis => {
+    data[axis].length = 0;
+  });
+
+  sampleCount = 0;
+  drawGraphs();
+}
+
+
+// ============================================================
+// PAUSE / PLAY
+// ============================================================
+
+function togglePause() {
+
+  paused = !paused;
+
+  pauseBtn.textContent =
+    paused ? "Play" : "Pause";
+}
+
+
+// ============================================================
+// ORIENTATION
+// ============================================================
+//
+// Roll is intentionally ignored.
+//
+// Pitch:
+//   calculated from accelerometer.
+//
+// Yaw:
+//   integrated from Z gyro.
+//   Yaw will slowly drift over time because a gyro alone
+//   cannot provide an absolute yaw reference.
+//
+// For your belt mounting:
+//   X = Left / Right
+//   Y = Forward / Backward
+//   Z = Up / Down
+//
+
+function updateOrientation(ax,ay,az,gx,gy,gz) {
+
+  const now = performance.now();
+
+  if (lastTime === null) {
+    lastTime = now;
+    return;
+  }
+
+  let dt = (now - lastTime) / 1000;
+  lastTime = now;
+
+  // Keep unexpected browser timing gaps from creating
+  // a huge yaw jump.
+  if (dt < 0 || dt > 0.2) {
+    dt = 0.02;
+  }
+
+  const accPitch =
+    Math.atan2(
+      -ax,
+      Math.sqrt(ay*ay + az*az)
+    ) * 180 / Math.PI;
+
+  // Simple complementary filter for pitch.
+  pitch =
+    0.98 * (pitch + gy * dt) +
+    0.02 * accPitch;
+
+  // Yaw from gyro only. This is intentionally simple.
+  yaw += gz * dt;
+
+  while (yaw > 180) yaw -= 360;
+  while (yaw < -180) yaw += 360;
+
+  anglesEl.textContent =
+    "Pitch " + pitch.toFixed(1) +
+    "° • Yaw " + yaw.toFixed(1) + "°";
+
+  drawOrientation();
+}
+
+
+// ============================================================
+// RESET ORIENTATION
+// ============================================================
+
+function resetOrientation() {
+  pitch = 0;
+  yaw = 0;
+  lastTime = null;
+
+  anglesEl.textContent =
+    "Pitch 0° • Yaw 0°";
+
+  drawOrientation();
+}
+
+
+// ============================================================
+// 3D CANVAS
+// ============================================================
+
+function drawOrientation() {
+
+  const canvas = document.getElementById("orientCanvas");
+  const ctx = canvas.getContext("2d");
+
+  resizeCanvas(canvas);
+
+  const w = canvas.width;
+  const h = canvas.height;
+
+  ctx.clearRect(0,0,w,h);
+
+  // Grid
+  ctx.strokeStyle = "#1e293b";
+  ctx.lineWidth = 1;
+
+  for (let x=0; x<w; x+=30) {
+    ctx.beginPath();
+    ctx.moveTo(x,0);
+    ctx.lineTo(x,h);
+    ctx.stroke();
+  }
+
+  for (let y=0; y<h; y+=30) {
+    ctx.beginPath();
+    ctx.moveTo(0,y);
+    ctx.lineTo(w,y);
+    ctx.stroke();
+  }
+
+  // Convert degrees to radians.
+  const py = pitch * Math.PI / 180;
+  const ya = yaw * Math.PI / 180;
+
+  // Device dimensions.
+  const sx = Math.min(w,h) * 0.46;
+  const sy = Math.min(w,h) * 0.18;
+
+  // Three axes in screen space.
+  // Roll is deliberately not used.
+  const forwardX =
+    Math.cos(ya) * sx;
+
+  const forwardY =
+    -Math.sin(py) * sy -
+    Math.sin(ya) * sx * 0.18;
+
+  const sideX =
+    -Math.sin(ya) * sx * 0.55;
+
+  const sideY =
+    Math.cos(ya) * sy * 0.55;
+
+  const cx = w/2;
+  const cy = h/2;
+
+  // Rectangle corners projected as a simple 3D-like plate.
+  const p1 = {x:cx-forwardX/2-sideX/2, y:cy-forwardY/2-sideY/2};
+  const p2 = {x:cx+forwardX/2-sideX/2, y:cy+forwardY/2-sideY/2};
+  const p3 = {x:cx+forwardX/2+sideX/2, y:cy+forwardY/2+sideY/2};
+  const p4 = {x:cx-forwardX/2+sideX/2, y:cy-forwardY/2+sideY/2};
+
+  ctx.beginPath();
+  ctx.moveTo(p1.x,p1.y);
+  ctx.lineTo(p2.x,p2.y);
+  ctx.lineTo(p3.x,p3.y);
+  ctx.lineTo(p4.x,p4.y);
+  ctx.closePath();
+
+  ctx.fillStyle = "#2563eb";
+  ctx.fill();
+  ctx.strokeStyle = "#93c5fd";
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Forward arrow.
+  const ax1 = cx;
+  const ay1 = cy;
+  const ax2 = cx + Math.cos(ya) * sx * 0.35;
+  const ay2 = cy - Math.sin(py) * sy * 0.35
+                   - Math.sin(ya) * sx * 0.18;
+
+  ctx.beginPath();
+  ctx.moveTo(ax1,ay1);
+  ctx.lineTo(ax2,ay2);
+  ctx.strokeStyle = "#fff";
+  ctx.lineWidth = 3;
+  ctx.stroke();
+
+  // Arrow head.
+  const a = Math.atan2(ay2-ay1,ax2-ax1);
+
+  ctx.beginPath();
+  ctx.moveTo(ax2,ay2);
+  ctx.lineTo(
+    ax2 - 12*Math.cos(a-0.5),
+    ay2 - 12*Math.sin(a-0.5)
+  );
+  ctx.lineTo(
+    ax2 - 12*Math.cos(a+0.5),
+    ay2 - 12*Math.sin(a+0.5)
+  );
+  ctx.closePath();
+
+  ctx.fillStyle = "#fff";
+  ctx.fill();
+
+  // Labels.
+  ctx.fillStyle = "#cbd5e1";
+  ctx.font = "12px Arial";
+
+  ctx.fillText(
+    "X: Left / Right",
+    10, 18
+  );
+
+  ctx.fillText(
+    "Y: Forward / Back",
+    10, 36
+  );
+
+  ctx.fillText(
+    "Z: Up / Down",
+    10, 54
+  );
+
+  ctx.fillText(
+    "Roll ignored",
+    10, h - 12
+  );
+}
+
+
+// ============================================================
+// 2D GRAPHS
+// ============================================================
+
+function drawGraphs() {
+
+  const ranges = {
+    ax: 15,
+    ay: 15,
+    az: 15,
+    gx: 250,
+    gy: 250,
+    gz: 250
+  };
+
+  axes.forEach(axis => {
+
+    const canvas = document.getElementById(axis);
+    const ctx = canvas.getContext("2d");
+
+    resizeCanvas(canvas);
+
+    const w = canvas.width;
+    const h = canvas.height;
+
+    ctx.clearRect(0,0,w,h);
+
+    // Background grid
+    ctx.strokeStyle = "#1e293b";
+    ctx.lineWidth = 1;
+
+    for (let i=1; i<4; i++) {
+      const y = h*i/4;
+
+      ctx.beginPath();
+      ctx.moveTo(0,y);
+      ctx.lineTo(w,y);
+      ctx.stroke();
+    }
+
+    // Zero line
+    ctx.strokeStyle = "#475569";
+    const zeroY = h/2;
+
+    ctx.beginPath();
+    ctx.moveTo(0,zeroY);
+    ctx.lineTo(w,zeroY);
+    ctx.stroke();
+
+    // Plot
+    const arr = data[axis];
+
+    if (arr.length < 2) {
+      return;
+    }
+
+    const range = ranges[axis];
+
+    ctx.strokeStyle = "#38bdf8";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+
+    arr.forEach((value,i) => {
+
+      const x =
+        i * w / (maxSamples - 1);
+
+      const clamped =
+        Math.max(-range,Math.min(range,value));
+
+      const y =
+        h/2 -
+        (clamped/range) * (h/2 - 4);
+
+      if (i === 0) {
+        ctx.moveTo(x,y);
+      } else {
+        ctx.lineTo(x,y);
+      }
+    });
+
+    ctx.stroke();
+
+    // Scale text
+    ctx.fillStyle = "#94a3b8";
+    ctx.font = "9px Arial";
+
+    ctx.fillText(
+      "+" + range,
+      3, 10
+    );
+
+    ctx.fillText(
+      "0",
+      3, h/2 - 2
+    );
+
+    ctx.fillText(
+      "-" + range,
+      3, h - 3
+    );
+  });
+}
+
+
+// ============================================================
+// CANVAS RESIZE
+// ============================================================
+
+function resizeCanvas(canvas) {
+
+  const dpr = Math.min(
+    window.devicePixelRatio || 1,
+    2
+  );
+
+  const rect = canvas.getBoundingClientRect();
+
+  const w = Math.max(
+    1,
+    Math.floor(rect.width * dpr)
+  );
+
+  const h = Math.max(
+    1,
+    Math.floor(rect.height * dpr)
+  );
+
+  if (
+    canvas.width !== w ||
+    canvas.height !== h
+  ) {
+    canvas.width = w;
+    canvas.height = h;
+  }
+}
+
+
+// ============================================================
+// RESET EVERYTHING
+// ============================================================
+
+function resetPage() {
+
+  axes.forEach(axis => {
+    data[axis].length = 0;
+  });
+
+  pitch = 0;
+  yaw = 0;
+  lastTime = null;
+
+  sampleCount = 0;
+
+  anglesEl.textContent =
+    "Pitch 0° • Yaw 0°";
+
+  motionEl.textContent = "Waiting";
+  accMagEl.textContent = "0.00 m/s²";
+  lastEventEl.textContent = "None";
+
+  drawGraphs();
+  drawOrientation();
+}
+
+
+// ============================================================
+// EVENTS
+// ============================================================
+
+connectBtn.addEventListener(
+  "click",
+  connectBLE
+);
+
+disconnectBtn.addEventListener(
+  "click",
+  disconnectBLE
+);
+
+pauseBtn.addEventListener(
+  "click",
+  togglePause
+);
+
+clearBtn.addEventListener(
+  "click",
+  clearGraphs
+);
+
+cancelBtn.addEventListener(
+  "click",
+  async () => {
+    await sendCommand("CANCEL");
+  }
+);
+
+windowSelect.addEventListener(
+  "change",
+  () => {
+    maxSamples =
+      Number(windowSelect.value);
+
+    axes.forEach(axis => {
+      while (data[axis].length > maxSamples) {
+        data[axis].shift();
+      }
+    });
+
+    drawGraphs();
+  }
+);
+
+window.addEventListener(
+  "resize",
+  () => {
+    drawGraphs();
+    drawOrientation();
+  }
+);
+
+
+// ============================================================
+// DRAW LOOP
+// ============================================================
+
+function animationLoop() {
+  drawGraphs();
+  requestAnimationFrame(animationLoop);
+}
+
+resetPage();
+setConnection(false);
+animationLoop();
+
+</script>
+</body>
+</html>
